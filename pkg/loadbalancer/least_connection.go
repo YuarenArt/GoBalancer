@@ -53,7 +53,7 @@ func NewLeastConnBalancer(options ...Option) *LeastConnBalancer {
 	}
 
 	if err := lb.validate(); err != nil {
-		panic(err)
+		panic(err.Error())
 	}
 
 	return lb

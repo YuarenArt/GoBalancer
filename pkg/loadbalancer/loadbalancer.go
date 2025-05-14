@@ -62,6 +62,13 @@ func NewBackend(rawURL string) (*Backend, error) {
 		return nil, err
 	}
 
+	if u.Scheme == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return nil, errors.New("invalid URL: the scheme must be http or https")
+	}
+	if u.Host == "" {
+		return nil, errors.New("invalid URL: requires a host")
+	}
+
 	proxy := httputil.NewSingleHostReverseProxy(u)
 
 	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
