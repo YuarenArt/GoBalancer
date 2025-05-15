@@ -15,6 +15,9 @@ type Config struct {
 	HTTPPort  string          // Port for HTTP server (e.g., "8080")
 	Balancer  BalancerConfig  // Load balancer settings
 	RateLimit RateLimitConfig // Rate limiting settings
+	LogType   string          // Logger type (e.g., "slog")
+	LogToFile bool            // Enable logging to file
+	LogFile   string          // Path to log file (e.g., "logs/app.log")
 }
 
 // RateLimitConfig holds settings for the rate limiter (Token Bucket).
@@ -57,6 +60,9 @@ func NewConfig() (*Config, error) {
 
 	// Load general flags
 	httpPort := flag.String("port", v.GetString("http_port"), "HTTP server port")
+	logType := flag.String("log-type", v.GetString("log_type"), "Logger type (e.g., slog)")
+	logToFile := flag.Bool("log-to-file", v.GetBool("log_to_file"), "Enable logging to file")
+	logFile := flag.String("log-file", v.GetString("log_file"), "Path to log file")
 	flag.Parse()
 
 	rateLimitCfg, err := loadRateLimitConfig(v)
@@ -73,6 +79,9 @@ func NewConfig() (*Config, error) {
 		HTTPPort:  resolve(v, "http_port", *httpPort),
 		RateLimit: rateLimitCfg,
 		Balancer:  balancerCfg,
+		LogType:   resolve(v, "log_type", *logType),
+		LogToFile: resolve(v, "log_to_file", *logToFile),
+		LogFile:   resolve(v, "log_file", *logFile),
 	}, nil
 }
 
@@ -114,15 +123,15 @@ func resolve[T comparable](v *viper.Viper, key string, flagVal T) T {
 	return v.Get(key).(T)
 }
 
-// setDefaults sets default configuration values.
+// setDefaults sets default configuration values for the application.
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("http_port", "8080")
 	v.SetDefault("backends", []string{"http://localhost:8081", "http://localhost:8082"})
-	v.SetDefault("log_level", "info")
+	v.SetDefault("log_type", "slog")
 	v.SetDefault("log_to_file", false)
-	v.SetDefault("log_file_path", "logs/balancer.log")
+	v.SetDefault("log_file", "logs/balancer.log")
 	v.SetDefault("rate_limit.enabled", false)
-	v.SetDefault("rate_limit.default_rate", 10.0)
+	v.SetDefault("rate_limit.default_rate", 10)
 	v.SetDefault("rate_limit.default_burst", 20)
 	v.SetDefault("rate_limit.type", "token_bucket")
 	v.SetDefault("rate_limit.ticker_duration", time.Second)
