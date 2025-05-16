@@ -2,7 +2,6 @@ package loadbalancer
 
 import (
 	"errors"
-	"github.com/YuarenArt/GoBalancer/internal/config"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -11,48 +10,15 @@ import (
 	"time"
 )
 
-var (
-	LeastConnBalancerType = "least_conn"
-)
-
-// Balancer defines the interface for load balancing algorithms.
-// Implementations must select the next backend and optionally
-// allow updating metrics used for selection.
-type Balancer interface {
-	// Next returns the address of the next backend to handle a request.
-	Next() (*Backend, error)
-
-	// MarkFailure marks the backend as down on error.
-	MarkFailure(b *Backend)
-}
-
-// NewBalancer creates Balancer instances based on the configuration.
-func NewBalancer(cfg *config.BalancerConfig) (Balancer, error) {
-	backends := make([]*Backend, 0, len(cfg.Backends))
-	for _, addr := range cfg.Backends {
-		backend, err := NewBackend(addr)
-		if err != nil {
-			return nil, errors.New("failed to create backend: " + err.Error())
-		}
-		backends = append(backends, backend)
-	}
-
-	switch cfg.Type {
-	case LeastConnBalancerType:
-		return NewLeastConnBalancer(
-			WithBackends(backends),
-		), nil
-	default:
-		return nil, errors.New("unknown balancer type: " + cfg.Type)
-	}
-}
-
 // Backend represents a single backend server.
 type Backend struct {
 	URL          *url.URL
 	Alive        bool
 	reverseProxy http.Handler
 	mux          sync.RWMutex
+	failCount    int
+	maxFails     int
+	lastFailed   time.Time
 }
 
 // NewBackend creates a Backend with reverse proxy.
@@ -70,7 +36,6 @@ func NewBackend(rawURL string) (*Backend, error) {
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(u)
-
 	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
 		if req.Context().Err() != nil {
 			http.Error(w, "Request canceled", http.StatusRequestTimeout)
@@ -90,6 +55,7 @@ func NewBackend(rawURL string) (*Backend, error) {
 		URL:          u,
 		Alive:        true,
 		reverseProxy: proxy,
+		maxFails:     3,
 	}, nil
 }
 
@@ -110,9 +76,20 @@ func (b *Backend) IsAlive() bool {
 	return b.Alive
 }
 
-// SetAlive updates backend's alive status.
+// SetAlive updates backend's alive status with failure threshold.
 func (b *Backend) SetAlive(alive bool) {
 	b.mux.Lock()
 	defer b.mux.Unlock()
-	b.Alive = alive
+	if alive {
+		b.Alive = true
+		b.failCount = 0
+		b.lastFailed = time.Time{}
+	} else {
+		b.failCount++
+		b.lastFailed = time.Now()
+		if b.failCount >= b.maxFails {
+			b.Alive = false
+			b.failCount = b.maxFails
+		}
+	}
 }
