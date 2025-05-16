@@ -163,7 +163,7 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 
 // checkOne performs a single HTTP health check on a given backend.
 func (hc *HealthChecker) checkOne(ctx context.Context, b *Backend) {
-	u := *b.URL // Copy to avoid modifying original
+	u := *b.URL
 	u.Path = hc.path
 
 	reqCtx, cancel := context.WithTimeout(ctx, hc.timeout)
@@ -171,45 +171,35 @@ func (hc *HealthChecker) checkOne(ctx context.Context, b *Backend) {
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		hc.logger.Error("Failed to create health check request",
-			"url", u.String(),
-			"error", err,
-		)
-		b.SetAlive(false)
+		hc.logger.Error("Failed to create health check request", "url", u.String(), "error", err)
 		return
 	}
 
-	// Add headers to mimic a real request
 	req.Header.Set("User-Agent", "GoBalancer-HealthCheck/1.0")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := hc.client.Do(req)
 	if err != nil {
-		// Check if the error is due to context cancellation
 		if reqCtx.Err() != nil {
-			hc.logger.Warn("Health check canceled",
-				"url", u.String(),
-				"error", reqCtx.Err(),
-			)
+			hc.logger.Warn("Health check canceled", "url", u.String(), "error", reqCtx.Err())
 		} else {
-			hc.logger.Error("Health check failed",
-				"url", u.String(),
-				"error", err,
-			)
+			hc.logger.Error("Health check failed", "url", u.String(), "error", err)
 		}
-		b.SetAlive(false)
+		if changed := b.SetAlive(false); changed {
+			hc.logger.Warn("Backend marked as DOWN", "url", u.String())
+		}
 		return
 	}
 	defer resp.Body.Close()
 
-	// Consider 2xx status codes as healthy
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		b.SetAlive(true)
+		if changed := b.SetAlive(true); changed {
+			hc.logger.Info("Backend restored to UP", "url", u.String())
+		}
 	} else {
-		hc.logger.Warn("Backend returned unhealthy status",
-			"url", u.String(),
-			"status", resp.StatusCode,
-		)
-		b.SetAlive(false)
+		hc.logger.Warn("Backend returned unhealthy status", "url", u.String(), "status", resp.StatusCode)
+		if changed := b.SetAlive(false); changed {
+			hc.logger.Warn("Backend marked as DOWN", "url", u.String())
+		}
 	}
 }

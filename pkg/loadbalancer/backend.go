@@ -55,7 +55,7 @@ func NewBackend(rawURL string) (*Backend, error) {
 		URL:          u,
 		Alive:        true,
 		reverseProxy: proxy,
-		maxFails:     3,
+		maxFails:     2,
 	}, nil
 }
 
@@ -77,19 +77,24 @@ func (b *Backend) IsAlive() bool {
 }
 
 // SetAlive updates backend's alive status with failure threshold.
-func (b *Backend) SetAlive(alive bool) {
+// Returns true if the status has changed (e.g., from alive to dead or vice versa).
+func (b *Backend) SetAlive(alive bool) (changed bool) {
 	b.mux.Lock()
 	defer b.mux.Unlock()
+
+	previous := b.Alive
+
 	if alive {
-		b.Alive = true
 		b.failCount = 0
+		b.Alive = true
 		b.lastFailed = time.Time{}
 	} else {
 		b.failCount++
 		b.lastFailed = time.Now()
 		if b.failCount >= b.maxFails {
 			b.Alive = false
-			b.failCount = b.maxFails
 		}
 	}
+
+	return previous != b.Alive
 }
