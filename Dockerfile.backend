@@ -1,0 +1,12 @@
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+COPY . .
+
+RUN cd cmd/backend_mock && go build -o /app/backend_mock
+
+FROM alpine:latest
+WORKDIR /app
+COPY --from=builder /app/backend_mock .
+EXPOSE 9001
+ENTRYPOINT ["./backend_mock"]
