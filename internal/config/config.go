@@ -4,6 +4,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +51,11 @@ func NewConfig() (*Config, error) {
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	// Handle ENV override for backends from comma-separated string
+	if val := os.Getenv("BACKENDS"); val != "" {
+		v.Set("backends", strings.Split(val, ","))
+	}
+
 	setDefaults(v)
 
 	if err := v.ReadInConfig(); err != nil {
@@ -58,10 +65,10 @@ func NewConfig() (*Config, error) {
 		}
 	}
 
-	// Load general flags
+	// Load general flags as strings
 	httpPort := flag.String("port", v.GetString("http_port"), "HTTP server port")
 	logType := flag.String("log-type", v.GetString("log_type"), "Logger type (e.g., slog)")
-	logToFile := flag.Bool("log-to-file", v.GetBool("log_to_file"), "Enable logging to file")
+	logToFile := flag.String("log-to-file", v.GetString("log_to_file"), "Enable logging to file (true/false)")
 	logFile := flag.String("log-file", v.GetString("log_file"), "Path to log file")
 	flag.Parse()
 
@@ -75,31 +82,57 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("error loading balancer config: %w", err)
 	}
 
+	// Преобразуем строковые значения в нужные типы
+	logToFileBool, err := strconv.ParseBool(resolve(v, "log_to_file", *logToFile))
+	if err != nil {
+		return nil, fmt.Errorf("invalid log_to_file value: %w", err)
+	}
+
 	return &Config{
 		HTTPPort:  resolve(v, "http_port", *httpPort),
 		RateLimit: rateLimitCfg,
 		Balancer:  balancerCfg,
 		LogType:   resolve(v, "log_type", *logType),
-		LogToFile: resolve(v, "log_to_file", *logToFile),
+		LogToFile: logToFileBool,
 		LogFile:   resolve(v, "log_file", *logFile),
 	}, nil
 }
 
 // loadRateLimitConfig loads configuration for the rate limiter.
 func loadRateLimitConfig(v *viper.Viper) (RateLimitConfig, error) {
-	rateLimit := flag.Bool("rate-limit", v.GetBool("rate_limit.enabled"), "Enable rate limiting")
-	rate := flag.Int("rate-limit-rate", v.GetInt("rate_limit.default_rate"), "Tokens per second")
-	burst := flag.Int("rate-limit-burst", v.GetInt("rate_limit.default_burst"), "Bucket capacity")
+	rateLimit := flag.String("rate-limit", v.GetString("rate_limit.enabled"), "Enable rate limiting (true/false)")
+	rate := flag.String("rate-limit-rate", v.GetString("rate_limit.default_rate"), "Tokens per second")
+	burst := flag.String("rate-limit-burst", v.GetString("rate_limit.default_burst"), "Bucket capacity")
 	limiterType := flag.String("rate-limit-type", v.GetString("rate_limit.type"), "Rate limiter algorithm type (e.g., token-bucket)")
-	tickerDuration := flag.Duration("rate-limit-ticker", v.GetDuration("rate_limit.ticker_duration"), "Ticker interval duration")
+	tickerDuration := flag.String("rate-limit-ticker", v.GetString("rate_limit.ticker_duration"), "Ticker interval duration")
 	flag.Parse()
 
+	enabled, err := strconv.ParseBool(resolve(v, "rate_limit.enabled", *rateLimit))
+	if err != nil {
+		return RateLimitConfig{}, fmt.Errorf("invalid rate_limit.enabled value: %w", err)
+	}
+
+	defaultRate, err := strconv.Atoi(resolve(v, "rate_limit.default_rate", *rate))
+	if err != nil {
+		return RateLimitConfig{}, fmt.Errorf("invalid rate_limit.default_rate value: %w", err)
+	}
+
+	defaultBurst, err := strconv.Atoi(resolve(v, "rate_limit.default_burst", *burst))
+	if err != nil {
+		return RateLimitConfig{}, fmt.Errorf("invalid rate_limit.default_burst value: %w", err)
+	}
+
+	tickerDur, err := time.ParseDuration(resolve(v, "rate_limit.ticker_duration", *tickerDuration))
+	if err != nil {
+		return RateLimitConfig{}, fmt.Errorf("invalid rate_limit.ticker_duration value: %w", err)
+	}
+
 	return RateLimitConfig{
-		Enabled:        resolve(v, "rate_limit.enabled", *rateLimit),
-		DefaultRate:    resolve(v, "rate_limit.default_rate", *rate),
-		DefaultBurst:   resolve(v, "rate_limit.default_burst", *burst),
+		Enabled:        enabled,
+		DefaultRate:    defaultRate,
+		DefaultBurst:   defaultBurst,
 		Type:           resolve(v, "rate_limit.type", *limiterType),
-		TickerDuration: resolve(v, "rate_limit.ticker_duration", *tickerDuration),
+		TickerDuration: tickerDur,
 	}, nil
 }
 
@@ -128,12 +161,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("http_port", "8080")
 	v.SetDefault("backends", []string{"http://localhost:8081", "http://localhost:8082"})
 	v.SetDefault("log_type", "slog")
-	v.SetDefault("log_to_file", false)
+	v.SetDefault("log_to_file", "false")
 	v.SetDefault("log_file", "logs/balancer.log")
-	v.SetDefault("rate_limit.enabled", false)
-	v.SetDefault("rate_limit.default_rate", 10)
-	v.SetDefault("rate_limit.default_burst", 20)
+	v.SetDefault("rate_limit.enabled", "false")
+	v.SetDefault("rate_limit.default_rate", "10")
+	v.SetDefault("rate_limit.default_burst", "20")
 	v.SetDefault("rate_limit.type", "token_bucket")
-	v.SetDefault("rate_limit.ticker_duration", time.Second)
+	v.SetDefault("rate_limit.ticker_duration", "1s")
 	v.SetDefault("balancer.type", "least_conn")
 }
