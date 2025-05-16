@@ -205,10 +205,6 @@ func (hc *HealthChecker) checkOne(ctx context.Context, b *Backend) {
 	// Consider 2xx status codes as healthy
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		b.SetAlive(true)
-		hc.logger.Info("Backend is healthy",
-			"url", u.String(),
-			"status", resp.StatusCode,
-		)
 	} else {
 		hc.logger.Warn("Backend returned unhealthy status",
 			"url", u.String(),
