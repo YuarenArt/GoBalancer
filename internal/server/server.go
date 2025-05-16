@@ -40,10 +40,14 @@ type Server struct {
 
 // NewServer initializes a new Server with given configuration.
 func NewServer(cfg *config.Config, logger logging.Logger) (*Server, error) {
-	bal, err := loadbalancer.NewBalancer(&cfg.Balancer)
+	bal, err := loadbalancer.NewBalancer(&cfg.Balancer, logger)
 	if err != nil {
 		logger.Error("Failed to initialize balancer", "error", err)
 		return nil, fmt.Errorf("failed to initialize balancer: %w", err)
+	}
+
+	if err := bal.StartHealthChecks(context.Background()); err != nil {
+		return nil, fmt.Errorf("failed to start health checks: %w", err)
 	}
 
 	// Create rate limiter (may be nil if disabled)
@@ -54,7 +58,13 @@ func NewServer(cfg *config.Config, logger logging.Logger) (*Server, error) {
 	}
 
 	// Compose middlewares: logging → rate limit → balancer
-	handler := loggingMiddleware(logger, rateLimitMiddleware(logger, rl, bal.(http.Handler)))
+	handler := loggingMiddleware(logger,
+		rateLimitMiddleware(logger, rl,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				bal.(http.Handler).ServeHTTP(w, r)
+			}),
+		),
+	)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.HTTPPort,
@@ -94,14 +104,17 @@ func (s *Server) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		s.logger.Info("context canceled, initiating shutdown")
+		s.logger.Info("Shutting down server")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-
-		if err := s.Shutdown(shutdownCtx); err != nil {
-			s.logger.Error("graceful shutdown failed", "error", err)
+		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
 			return err
 		}
+
+		if s.rateLimiter != nil {
+			s.rateLimiter.Stop()
+		}
+		s.balancer.StopHealthChecks()
 		return ctx.Err()
 
 	case err := <-errChan:
@@ -117,6 +130,9 @@ func (s *Server) Run(ctx context.Context) error {
 // Shutdown gracefully stops the server handling in-flight requests.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.logger.Info("Shutting down HTTP server", "addr", s.httpServer.Addr)
+
+	// Stop health checks before shutting down the server
+	s.balancer.StopHealthChecks()
 
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		s.logger.Error("Server shutdown failed", "addr", s.httpServer.Addr, "error", err)
