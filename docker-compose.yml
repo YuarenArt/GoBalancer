@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  balancer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - HTTP_PORT=8080
+      - BALANCER_TYPE=least_conn
+      - BACKENDS=http://backend1:8081,http://backend2:8082
+      - LOG_TYPE=slog
+      - LOG_TO_FILE=false
+      - LOG_FILE=logs/balancer.log
+      - RATE_LIMIT_ENABLED=false
+      - RATE_LIMIT_DEFAULT_RATE=10
+      - RATE_LIMIT_DEFAULT_BURST=20
+      - RATE_LIMIT_TYPE=token_bucket
+      - RATE_LIMIT_TICKER_DURATION=1s
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    depends_on:
+      - backend1
+      - backend2
+    networks:
+      - gobalancer-network
+
+  backend1:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment:
+      - PORT=8081
+    expose:
+      - "8081"
+    networks:
+      - gobalancer-network
+
+  backend2:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment:
+      - PORT=8082
+    expose:
+      - "8082"
+    networks:
+      - gobalancer-network
+
+networks:
+  gobalancer-network:
+    driver: bridge
