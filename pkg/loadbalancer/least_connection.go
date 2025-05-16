@@ -1,18 +1,21 @@
 package loadbalancer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"sync"
+	"time"
 )
 
-// LeastConnBalancer distributes load using Least Connections algorithm.
+// LeastConnBalancer distributes load using the Least Connections algorithm.
 type LeastConnBalancer struct {
-	backends []*Backend
-	loads    map[*Backend]int
-	mux      sync.RWMutex
+	backends      []*Backend       // List of backends
+	loads         map[*Backend]int // Active connections per backend
+	mux           sync.RWMutex     // Protects balancer state
+	healthChecker *HealthChecker   // Health checker for backends
 }
 
 // Option allows customizing the LeastConnBalancer.
@@ -29,6 +32,13 @@ func WithBackends(backends []*Backend) Option {
 func WithInitialLoads(loads map[*Backend]int) Option {
 	return func(lb *LeastConnBalancer) {
 		lb.loads = loads
+	}
+}
+
+// WithHealthChecker sets the health checker for the balancer.
+func WithHealthChecker(hc *HealthChecker) Option {
+	return func(lb *LeastConnBalancer) {
+		lb.healthChecker = hc
 	}
 }
 
@@ -71,6 +81,14 @@ func (lb *LeastConnBalancer) Next() (*Backend, error) {
 		if !b.IsAlive() {
 			continue
 		}
+		// Skipping servers that recently failed health check
+		b.mux.RLock()
+		if !b.lastFailed.IsZero() && time.Since(b.lastFailed) < 10*time.Second {
+			b.mux.RUnlock()
+			continue
+		}
+		b.mux.RUnlock()
+
 		cnt := lb.loads[b]
 		if cnt < minConns {
 			minConns = cnt
@@ -118,6 +136,22 @@ func (lb *LeastConnBalancer) MarkFailure(b *Backend) {
 	lb.mux.Lock()
 	defer lb.mux.Unlock()
 	lb.loads[b] = 0
+}
+
+// StartHealthChecks starts the health checking process using the existing health checker.
+func (lb *LeastConnBalancer) StartHealthChecks(ctx context.Context) error {
+	if lb.healthChecker == nil {
+		return errors.New("health checker not initialized")
+	}
+	lb.healthChecker.Run(ctx)
+	return nil
+}
+
+// StopHealthChecks stops the health checker.
+func (lb *LeastConnBalancer) StopHealthChecks() {
+	if lb.healthChecker != nil {
+		lb.healthChecker.Stop()
+	}
 }
 
 // validate ensures the LeastConnBalancer configuration is valid.

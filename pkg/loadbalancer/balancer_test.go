@@ -3,6 +3,7 @@ package loadbalancer
 import (
 	"context"
 	"github.com/YuarenArt/GoBalancer/internal/config"
+	"github.com/YuarenArt/GoBalancer/internal/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"net/http"
@@ -55,6 +56,8 @@ func (s *LoadBalancerTestSuite) TestBackendNewInvalidURL() {
 func (s *LoadBalancerTestSuite) TestBackendAliveStatus() {
 	backend, err := NewBackend("http://localhost:8080")
 	s.NoError(err)
+
+	backend.maxFails = 1
 
 	s.True(backend.IsAlive())
 	backend.SetAlive(false)
@@ -218,16 +221,21 @@ func (s *LoadBalancerTestSuite) TestLeastConnBalancerMarkFailure() {
 	s.NoError(err)
 	backend2, err := NewBackend("http://localhost:8082")
 	s.NoError(err)
+
+	// Set fail threshold to 1 so that single failure marks backend as dead
+	backend1.maxFails = 1
+
 	lb := NewLeastConnBalancer(WithBackends([]*Backend{backend1, backend2}))
 	lb.loads[backend1] = 5
 
 	lb.MarkFailure(backend1)
-	s.False(backend1.IsAlive())
-	s.Equal(0, lb.loads[backend1])
+
+	s.False(backend1.IsAlive())    // Will now be false
+	s.Equal(0, lb.loads[backend1]) // Should be reset to 0
 
 	selected, err := lb.Next()
 	s.NoError(err)
-	s.Equal(backend2, selected)
+	s.Equal(backend2, selected) // Should select only alive backend
 }
 
 // TestNewBalancerSuccess verifies that NewBalancer creates the correct balancer type.
@@ -236,13 +244,14 @@ func (s *LoadBalancerTestSuite) TestNewBalancerSuccess() {
 		Type:     LeastConnBalancerType,
 		Backends: []string{"http://localhost:8081", "http://localhost:8082"},
 	}
-	balancer, err := NewBalancer(cfg)
+	// inject a no-op slog logger so signature matches NewBalancer(cfg, logger)
+	logger := logging.NewLogger(&config.Config{LogType: "slog"})
+	balancer, err := NewBalancer(cfg, logger)
 	s.NoError(err)
 	s.NotNil(balancer)
 	s.IsType(&LeastConnBalancer{}, balancer)
 
-	lb, ok := balancer.(*LeastConnBalancer)
-	s.True(ok)
+	lb := balancer.(*LeastConnBalancer)
 	s.Len(lb.backends, 2)
 	s.Equal("http://localhost:8081", lb.backends[0].URL.String())
 	s.Equal("http://localhost:8082", lb.backends[1].URL.String())
@@ -254,7 +263,8 @@ func (s *LoadBalancerTestSuite) TestNewBalancerInvalidType() {
 		Type:     "unknown",
 		Backends: []string{"http://localhost:8081"},
 	}
-	balancer, err := NewBalancer(cfg)
+	logger := logging.NewLogger(&config.Config{LogType: "slog"})
+	balancer, err := NewBalancer(cfg, logger)
 	s.Error(err)
 	s.Contains(err.Error(), "unknown balancer type")
 	s.Nil(balancer)
@@ -266,7 +276,8 @@ func (s *LoadBalancerTestSuite) TestNewBalancerInvalidBackendURL() {
 		Type:     LeastConnBalancerType,
 		Backends: []string{"invalid_url"},
 	}
-	balancer, err := NewBalancer(cfg)
+	logger := logging.NewLogger(&config.Config{LogType: "slog"})
+	balancer, err := NewBalancer(cfg, logger)
 	s.Error(err)
 	s.Contains(err.Error(), "failed to create backend")
 	s.Nil(balancer)
