@@ -54,10 +54,6 @@ func NewBalancer(cfg *config.BalancerConfig, logger logging.Logger) (Balancer, e
 			WithBackends(backends),
 			WithHealthChecker(healthChecker),
 		)
-		if err := lb.StartHealthChecks(context.Background()); err != nil {
-			logger.Error("Failed to start health checks", "error", err)
-			return nil, fmt.Errorf("failed to start health checks: %w", err)
-		}
 		return lb, nil
 	default:
 		logger.Error("Unknown balancer type", "type", cfg.Type)
