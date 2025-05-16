@@ -8,96 +8,22 @@ import (
 	"github.com/stretchr/testify/suite"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httputil"
 	"sync"
 	"testing"
 )
 
-type mockReverseProxy struct {
-	called bool
-	mu     sync.Mutex
-}
-
-func (m *mockReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	m.mu.Lock()
-	m.called = true
-	m.mu.Unlock()
-	w.WriteHeader(http.StatusOK)
-}
-
-// LoadBalancerTestSuite is a test suite.
-type LoadBalancerTestSuite struct {
+// LeastConnTest is a test suite.
+type LeastConnTest struct {
 	suite.Suite
 }
 
-// TestLoadBalancer runs the LoadBalancer test suite.
-func TestLoadBalancer(t *testing.T) {
-	suite.Run(t, new(LoadBalancerTestSuite))
-}
-
-// TestBackendNewSuccess verifies that NewBackend creates a backend with a valid URL.
-func (s *LoadBalancerTestSuite) TestBackendNewSuccess() {
-	backend, err := NewBackend("http://localhost:8080")
-	s.NoError(err)
-	s.NotNil(backend)
-	s.Equal("http://localhost:8080", backend.URL.String())
-	s.True(backend.IsAlive())
-	s.NotNil(backend.reverseProxy)
-}
-
-// TestBackendNewInvalidURL checks that NewBackend fails with an invalid URL.
-func (s *LoadBalancerTestSuite) TestBackendNewInvalidURL() {
-	backend, err := NewBackend("invalid_url")
-	s.Error(err)
-	s.Nil(backend)
-}
-
-// TestBackendAliveStatus tests IsAlive and SetAlive functionality.
-func (s *LoadBalancerTestSuite) TestBackendAliveStatus() {
-	backend, err := NewBackend("http://localhost:8080")
-	s.NoError(err)
-
-	backend.maxFails = 1
-
-	s.True(backend.IsAlive())
-	backend.SetAlive(false)
-	s.False(backend.IsAlive())
-	backend.SetAlive(true)
-	s.True(backend.IsAlive())
-}
-
-// TestBackendServeProxySuccess verifies that ServeProxy forwards requests correctly.
-func (s *LoadBalancerTestSuite) TestBackendServeProxySuccess() {
-	backend, err := NewBackend("http://localhost:8080")
-	s.NoError(err)
-	mockProxy := &mockReverseProxy{}
-	backend.reverseProxy = mockProxy
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/", nil)
-
-	backend.ServeProxy(w, req)
-	s.True(mockProxy.called)
-	s.Equal(http.StatusOK, w.Code)
-}
-
-// TestBackendServeProxyCanceledContext checks that ServeProxy handle context cancellation.
-func (s *LoadBalancerTestSuite) TestBackendServeProxyCanceledContext() {
-	backend, err := NewBackend("http://localhost:8080")
-	s.NoError(err)
-
-	w := httptest.NewRecorder()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	req := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
-
-	backend.ServeProxy(w, req)
-	s.Equal(http.StatusRequestTimeout, w.Code)
-	s.Contains(w.Body.String(), "Request canceled")
+// TestLeastConn runs the LoadBalancer test suite.
+func TestLeastConn(t *testing.T) {
+	suite.Run(t, new(LeastConnTest))
 }
 
 // TestLeastConnBalancerNewInvalidConfig verifies that NewLeastConnBalancer panics with invalid configs.
-func (s *LoadBalancerTestSuite) TestLeastConnBalancerNewInvalidConfig() {
+func (s *LeastConnTest) TestLeastConnBalancerNewInvalidConfig() {
 	assert.PanicsWithValue(s.T(), "at least one backend is required", func() {
 		NewLeastConnBalancer()
 	})
@@ -121,7 +47,7 @@ func (s *LoadBalancerTestSuite) TestLeastConnBalancerNewInvalidConfig() {
 }
 
 // TestLeastConnBalancerNewSuccess verifies that NewLeastConnBalancer initializes correctly.
-func (s *LoadBalancerTestSuite) TestLeastConnBalancerNewSuccess() {
+func (s *LeastConnTest) TestLeastConnBalancerNewSuccess() {
 	backend1, err := NewBackend("http://localhost:8081")
 	s.NoError(err)
 	backend2, err := NewBackend("http://localhost:8082")
@@ -139,7 +65,7 @@ func (s *LoadBalancerTestSuite) TestLeastConnBalancerNewSuccess() {
 }
 
 // TestLeastConnBalancerNextSuccess tests that Next select the backend with the least connections.
-func (s *LoadBalancerTestSuite) TestLeastConnBalancerNextSuccess() {
+func (s *LeastConnTest) TestLeastConnBalancerNextSuccess() {
 	backend1, err := NewBackend("http://localhost:8081")
 	s.NoError(err)
 	backend2, err := NewBackend("http://localhost:8082")
@@ -154,7 +80,7 @@ func (s *LoadBalancerTestSuite) TestLeastConnBalancerNextSuccess() {
 }
 
 // TestLeastConnBalancerNextNoAliveBackends checks that Next fails when no backends are alive.
-func (s *LoadBalancerTestSuite) TestLeastConnBalancerNextNoAliveBackends() {
+func (s *LeastConnTest) TestLeastConnBalancerNextNoAliveBackends() {
 	backend, err := NewBackend("http://localhost:8081")
 	s.NoError(err)
 	backend.SetAlive(false)
@@ -166,7 +92,7 @@ func (s *LoadBalancerTestSuite) TestLeastConnBalancerNextNoAliveBackends() {
 }
 
 // TestLeastConnBalancerServeHTTPSuccess verifies that ServeHTTP forwards requests correctly.
-func (s *LoadBalancerTestSuite) TestLeastConnBalancerServeHTTPSuccess() {
+func (s *LeastConnTest) TestLeastConnBalancerServeHTTPSuccess() {
 	backend, err := NewBackend("http://localhost:8081")
 	s.NoError(err)
 	mockProxy := &mockReverseProxy{}
@@ -183,7 +109,7 @@ func (s *LoadBalancerTestSuite) TestLeastConnBalancerServeHTTPSuccess() {
 }
 
 // TestLeastConnBalancerServeHTTPCanceledContext checks that ServeHTTP handles context cancellation.
-func (s *LoadBalancerTestSuite) TestLeastConnBalancerServeHTTPCanceledContext() {
+func (s *LeastConnTest) TestLeastConnBalancerServeHTTPCanceledContext() {
 	backend, err := NewBackend("http://localhost:8081")
 	s.NoError(err)
 	lb := NewLeastConnBalancer(WithBackends([]*Backend{backend}))
@@ -199,7 +125,7 @@ func (s *LoadBalancerTestSuite) TestLeastConnBalancerServeHTTPCanceledContext() 
 }
 
 // TestLeastConnBalancerRelease tests that Release decrements the load counter correctly.
-func (s *LoadBalancerTestSuite) TestLeastConnBalancerRelease() {
+func (s *LeastConnTest) TestLeastConnBalancerRelease() {
 	backend, err := NewBackend("http://localhost:8081")
 	s.NoError(err)
 	lb := NewLeastConnBalancer(WithBackends([]*Backend{backend}))
@@ -216,7 +142,7 @@ func (s *LoadBalancerTestSuite) TestLeastConnBalancerRelease() {
 }
 
 // TestLeastConnBalancerMarkFailure verifies that MarkFailure updates backend status and resets a load.
-func (s *LoadBalancerTestSuite) TestLeastConnBalancerMarkFailure() {
+func (s *LeastConnTest) TestLeastConnBalancerMarkFailure() {
 	backend1, err := NewBackend("http://localhost:8081")
 	s.NoError(err)
 	backend2, err := NewBackend("http://localhost:8082")
@@ -239,7 +165,7 @@ func (s *LoadBalancerTestSuite) TestLeastConnBalancerMarkFailure() {
 }
 
 // TestNewBalancerSuccess verifies that NewBalancer creates the correct balancer type.
-func (s *LoadBalancerTestSuite) TestNewBalancerSuccess() {
+func (s *LeastConnTest) TestNewBalancerSuccess() {
 	cfg := &config.BalancerConfig{
 		Type:     LeastConnBalancerType,
 		Backends: []string{"http://localhost:8081", "http://localhost:8082"},
@@ -258,7 +184,7 @@ func (s *LoadBalancerTestSuite) TestNewBalancerSuccess() {
 }
 
 // TestNewBalancerInvalidType checks that NewBalancer fails with an unknown balancer type.
-func (s *LoadBalancerTestSuite) TestNewBalancerInvalidType() {
+func (s *LeastConnTest) TestNewBalancerInvalidType() {
 	cfg := &config.BalancerConfig{
 		Type:     "unknown",
 		Backends: []string{"http://localhost:8081"},
@@ -271,7 +197,7 @@ func (s *LoadBalancerTestSuite) TestNewBalancerInvalidType() {
 }
 
 // TestNewBalancerInvalidBackendURL verifies that NewBalancer fails with an invalid backend URL.
-func (s *LoadBalancerTestSuite) TestNewBalancerInvalidBackendURL() {
+func (s *LeastConnTest) TestNewBalancerInvalidBackendURL() {
 	cfg := &config.BalancerConfig{
 		Type:     LeastConnBalancerType,
 		Backends: []string{"invalid_url"},
@@ -284,7 +210,7 @@ func (s *LoadBalancerTestSuite) TestNewBalancerInvalidBackendURL() {
 }
 
 // TestConcurrentNextOperations tests that Next handle concurrent calls correctly.
-func (s *LoadBalancerTestSuite) TestConcurrentNextOperations() {
+func (s *LeastConnTest) TestConcurrentNextOperations() {
 	backend1, err := NewBackend("http://localhost:8081")
 	s.NoError(err)
 	backend2, err := NewBackend("http://localhost:8082")
@@ -331,7 +257,7 @@ func (s *LoadBalancerTestSuite) TestConcurrentNextOperations() {
 }
 
 // TestConcurrentServeHTTPOperations tests that ServeHTTP handle concurrent requests correctly.
-func (s *LoadBalancerTestSuite) TestConcurrentServeHTTPOperations() {
+func (s *LeastConnTest) TestConcurrentServeHTTPOperations() {
 	backend1, err := NewBackend("http://localhost:8081")
 	s.NoError(err)
 	backend2, err := NewBackend("http://localhost:8082")
@@ -361,32 +287,4 @@ func (s *LoadBalancerTestSuite) TestConcurrentServeHTTPOperations() {
 	s.True(mockProxy2.called)
 	s.Equal(0, lb.loads[backend1])
 	s.Equal(0, lb.loads[backend2])
-}
-
-// TestErrorHandler verifies that the reverse proxy's ErrorHandler handles errors correctly.
-func (s *LoadBalancerTestSuite) TestErrorHandler() {
-	backend, err := NewBackend("http://localhost:8081")
-	s.NoError(err)
-
-	// Create a real reverse proxy and configure its ErrorHandler
-	proxy := httputil.NewSingleHostReverseProxy(backend.URL)
-	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
-		if req.Context().Err() != nil {
-			http.Error(w, "Request canceled", http.StatusRequestTimeout)
-			return
-		}
-		http.Error(w, "Proxy error: "+err.Error(), http.StatusBadGateway)
-	}
-
-	// Assign the configured proxy to the http.Handler field
-	backend.reverseProxy = proxy
-
-	w := httptest.NewRecorder()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	req := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
-
-	backend.ServeProxy(w, req)
-	s.Equal(http.StatusRequestTimeout, w.Code)
-	s.Contains(w.Body.String(), "Request canceled")
 }

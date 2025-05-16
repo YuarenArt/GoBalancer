@@ -13,22 +13,22 @@ import (
 	"github.com/YuarenArt/GoBalancer/internal/logging"
 )
 
-type HealthCheckerTestSuite struct {
+type HealthCheckerTest struct {
 	suite.Suite
 	logger logging.Logger
 }
 
-func (s *HealthCheckerTestSuite) SetupTest() {
+func (s *HealthCheckerTest) SetupTest() {
 	// Initialize a fresh logger for each test to avoid log pollution
 	cfg := &config.Config{LogType: "slog"}
 	s.logger = logging.NewLogger(cfg)
 }
 
-func TestHealthCheckerSuite(t *testing.T) {
-	suite.Run(t, new(HealthCheckerTestSuite))
+func TestHealthChecker(t *testing.T) {
+	suite.Run(t, new(HealthCheckerTest))
 }
 
-func (s *HealthCheckerTestSuite) TestHealthyEndpointMarksAlive() {
+func (s *HealthCheckerTest) TestHealthyEndpointMarksAlive() {
 	// server always returns 200
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -54,7 +54,7 @@ func (s *HealthCheckerTestSuite) TestHealthyEndpointMarksAlive() {
 	s.True(backend.IsAlive(), "backend should be marked alive on 200")
 }
 
-func (s *HealthCheckerTestSuite) TestUnhealthyEndpointMarksDown() {
+func (s *HealthCheckerTest) TestUnhealthyEndpointMarksDown() {
 	// Server returns 500 Internal Server Error
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -81,7 +81,7 @@ func (s *HealthCheckerTestSuite) TestUnhealthyEndpointMarksDown() {
 	s.False(backend.IsAlive(), "backend should be marked down on 500")
 }
 
-func (s *HealthCheckerTestSuite) TestTimeoutMarksDown() {
+func (s *HealthCheckerTest) TestTimeoutMarksDown() {
 	// server delays longer than timeout
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(200 * time.Millisecond)
@@ -107,7 +107,7 @@ func (s *HealthCheckerTestSuite) TestTimeoutMarksDown() {
 	s.False(backend.IsAlive(), "backend should be marked down on timeout")
 }
 
-func (s *HealthCheckerTestSuite) TestRunAndStopCycle() {
+func (s *HealthCheckerTest) TestRunAndStopCycle() {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
